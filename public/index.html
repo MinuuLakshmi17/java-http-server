@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>java-http-server — Live Demo</title>
+<style>
+  :root { --bg: #0f172a; --panel: #1e293b; --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8; --ok: #4ade80; --bad: #f87171; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 28px 24px 8px; max-width: 860px; margin: 0 auto; }
+  h1 { margin: 0 0 6px; font-size: 28px; }
+  h1 span { color: var(--accent); }
+  p.sub { color: var(--muted); margin: 0 0 18px; }
+  main { max-width: 860px; margin: 0 auto; padding: 0 24px 40px; display: grid; gap: 18px; }
+  .card { background: var(--panel); border-radius: 12px; padding: 18px 20px; }
+  .card h2 { margin: 0 0 12px; font-size: 16px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .stat b { display: block; font-size: 26px; }
+  .stat span { color: var(--muted); font-size: 13px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  input { flex: 1; min-width: 120px; padding: 9px 10px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: var(--text); font-size: 14px; }
+  button { padding: 9px 16px; border: 0; border-radius: 8px; background: var(--accent); color: #082f49; font-weight: 700; cursor: pointer; font-size: 14px; }
+  button.ghost { background: #334155; color: var(--text); }
+  button.danger { background: #7f1d1d; color: #fecaca; }
+  #log { font-family: ui-monospace, monospace; font-size: 13px; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; margin: 0; }
+  #log .ok { color: var(--ok); } #log .bad { color: var(--bad); }
+  #keys { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+  #keys button { background: #334155; color: var(--text); font-weight: 500; padding: 5px 10px; }
+  code { background: #0f172a; padding: 2px 6px; border-radius: 5px; font-size: 13px; }
+  footer { color: var(--muted); font-size: 13px; text-align: center; padding-bottom: 24px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>java-http-server <span>— live demo</span></h1>
+  <p class="sub">A concurrent HTTP/1.1 server written from scratch in pure Java 17, no dependencies.
+  This page is served by the server itself. Everything below talks to its JSON API.</p>
+</header>
+<main>
+  <section class="card">
+    <h2>Server stats</h2>
+    <div class="stats">
+      <div class="stat"><b id="uptime">–</b><span>uptime (s)</span></div>
+      <div class="stat"><b id="requests">–</b><span>requests served</span></div>
+      <div class="stat"><b id="conns">–</b><span>active connections</span></div>
+      <div class="stat"><b id="keycount">–</b><span>keys stored</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Key-value playground</h2>
+    <div class="row">
+      <input id="key" placeholder="key (e.g. greeting)">
+      <input id="value" placeholder="value (e.g. hello world)">
+      <input id="ttl" type="number" min="0" placeholder="ttl seconds (optional)">
+    </div>
+    <div class="row">
+      <button id="putBtn">PUT key</button>
+      <button id="getBtn" class="ghost">GET key</button>
+      <button id="delBtn" class="danger">DELETE key</button>
+      <button id="listBtn" class="ghost">List keys</button>
+    </div>
+    <p id="keys"></p>
+  </section>
+
+  <section class="card">
+    <h2>Try it from a terminal</h2>
+    <p><code>curl http://localhost:8080/api/health</code></p>
+    <p><code>curl -X PUT -d '{"value":"hello"}' http://localhost:8080/api/kv/greeting</code></p>
+    <p><code>curl http://localhost:8080/api/kv/greeting</code></p>
+  </section>
+
+  <section class="card">
+    <h2>Activity log</h2>
+    <pre id="log"></pre>
+  </section>
+</main>
+<footer>java-http-server · pure JDK 17 · zero dependencies · MIT</footer>
+<script>
+  const logEl = document.getElementById('log');
+  function log(msg, ok) {
+    const line = document.createElement('div');
+    line.className = ok === false ? 'bad' : 'ok';
+    line.textContent = new Date().toLocaleTimeString() + '  ' + msg;
+    logEl.prepend(line);
+  }
+  async function api(path, opts) {
+    const res = await fetch(path, opts);
+    const text = await res.text();
+    log(res.status + ' ' + (opts && opts.method ? opts.method : 'GET') + ' ' + path + '  ' + text, res.ok);
+    return { status: res.status, text };
+  }
+  async function refreshStats() {
+    try {
+      const res = await fetch('/api/stats');
+      const s = await res.json();
+      document.getElementById('uptime').textContent = s.uptime_seconds;
+      document.getElementById('requests').textContent = s.requests_served;
+      document.getElementById('conns').textContent = s.active_connections;
+      document.getElementById('keycount').textContent = s.keys;
+    } catch (e) { /* server restarting */ }
+  }
+  async function listKeys() {
+    const { text } = await api('/api/kv');
+    try {
+      const data = JSON.parse(text);
+      const box = document.getElementById('keys');
+      box.innerHTML = '';
+      data.keys.forEach(k => {
+        const b = document.createElement('button');
+        b.textContent = k;
+        b.onclick = () => { document.getElementById('key').value = k; document.getElementById('getBtn').click(); };
+        box.appendChild(b);
+      });
+    } catch (e) { /* already logged */ }
+  }
+  document.getElementById('putBtn').onclick = async () => {
+    const key = document.getElementById('key').value.trim();
+    const value = document.getElementById('value').value;
+    const ttl = parseInt(document.getElementById('ttl').value, 10);
+    if (!key) { log('PUT needs a key', false); return; }
+    const body = { value };
+    if (!isNaN(ttl) && ttl > 0) body.ttl = ttl;
+    await api('/api/kv/' + encodeURIComponent(key), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    listKeys();
+  };
+  document.getElementById('getBtn').onclick = async () => {
+    const key = document.getElementById('key').value.trim();
+    if (!key) { log('GET needs a key', false); return; }
+    await api('/api/kv/' + encodeURIComponent(key));
+  };
+  document.getElementById('delBtn').onclick = async () => {
+    const key = document.getElementById('key').value.trim();
+    if (!key) { log('DELETE needs a key', false); return; }
+    await api('/api/kv/' + encodeURIComponent(key), { method: 'DELETE' });
+    listKeys();
+  };
+  document.getElementById('listBtn').onclick = listKeys;
+  refreshStats();
+  listKeys();
+  setInterval(refreshStats, 2000);
+  log('dashboard loaded — talking to the live server');
+</script>
+</body>
+</html>
